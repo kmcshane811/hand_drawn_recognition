@@ -1,0 +1,1051 @@
+---
+title: 'Assignment 2: Feature Engineering, Statistical Analysis and Machine Learning'
+author: "Kaylem McShane (40288049)"
+output:
+  pdf_document:
+    includes:
+      in_header: preamble.tex
+  word_document: default
+  html_document:
+    df_print: paged
+  html_notebook: default
+---
+
+# Introduction
+
+The purpose of this assignment is to implement learned methods of feature engineering and statistical analysis in order to perform accurate classifications on a data-set of handwritten letters and symbols.
+
+```{r}
+library(MASS) #https://www.rdocumentation.org/packages/MASS/versions/7.3-47
+
+library(ggplot2) #https://www.rdocumentation.org/packages/ggplot2/versions/3.3.5
+
+library(psych) #https://cran.r-project.org/web/packages/psych/psych.pdf
+
+library(dplyr) #https://www.rdocumentation.org/packages/dplyr/versions/0.7.8
+
+library(stringr) #https://www.rdocumentation.org/packages/stringr/versions/1.4.0
+
+library(GDINA) #https://www.rdocumentation.org/packages/GDINA/versions/2.8.8
+
+library(matlab) #https://www.rdocumentation.org/packages/R.matlab/versions/3.6.2/topics/R.matlab-package
+
+library(raster) ##https://www.rdocumentation.org/packages/raster/versions/3.4-5/topics/clump
+
+library(igraph) #https://www.rdocumentation.org/packages/igraph/versions/0.3.1
+
+library(functional) #https://www.rdocumentation.org/packages/functional/versions/0.6
+
+library(jtools) #https://www.rdocumentation.org/packages/jtools/versions/2.1.4
+
+library(olsrr) #https://www.rdocumentation.org/packages/olsrr/versions/0.5.3
+
+library("knitr") #https://www.rdocumentation.org/packages/knitr/versions/1.30
+
+library(tinytex) #https://www.rdocumentation.org/packages/tinytex/versions/0.37
+```
+
+# Section 1
+
+Using the GIMP Image manipulation software programe, the first requirement of the assignment was to create a populated data set of handwritten letters and symbols.
+
+Using GIMP, a data-set of 140 PGM files was generated, consisting of:
+
+8 x a,b,c,d,e,f,g,h,i,j
+
+10 x happy faces, sad faces, and exclamation marks.
+
+Due to the ability of R to handle CSV files, it was essential to the assignment to convert the data set to CSV format. Fortunately, as R is incredibly flexible in it's ability to handle different file types, the readlines function was able to be employed to load the PGM into the main body of code, sourced from the following site: <https://stackoverflow.com/questions/66482754/convert-pgm-to-matrix>
+
+PGM files have the following structure: n+4 rows x 1 column where n is the number of pixels in this context. The file contains a header outlining the file type, image resolution and bit-depth.\
+As the data was already separated, it could be easily represented in a matrix but the header would first have to be removed, removing the first 4 elements and leaving a vector of 324 items. This vector could then be casted to an 18x18 matrix representative of the drawn image.
+
+When representing each pixel, any number between 0 and 255 could be used to show a shade where 0 is black and 255 white. To simplify the model, the data would be transformed so all values \<128 would be treated as black and set to 1, and all values \>=128 would be treated as white and set to 0.
+
+Once these transformations had been completed, the matrix could then be written directly to a csv file using the write.table function, storing the csv in the image folder.
+
+```{r}
+
+#https://stackoverflow.com/questions/66482754/convert-pgm-to-matrix
+
+files <- list.files(path= './pgm', pattern=".pgm", all.files=T, full.names=T)
+for(i in files){
+    pgm <- readLines(i)
+    pgm <- pgm[-(1:4)] # remove first 4 elements
+    pgm <- as.numeric(pgm) # convert from character to numeric vector
+    pgm <- matrix(pgm, 18, 18, byrow=TRUE)
+
+    is.matrix(pgm) # TRUE
+    dim(pgm) # [1] 18 18
+    pgm[pgm<128] <- 1
+    pgm[pgm>=128] <- 0
+
+    name <- substr(i,6,nchar(i)-4)
+    name <- paste("./images/",name,sep="")
+    name <- paste(name,"csv",sep=".")
+    write.table(pgm,sep = ",",file = name,col.names = F,row.names = F)
+}
+
+```
+
+# Section 2
+
+Once the data-set was converted to the appropriate form, the next step was too extract relevant information from the data-set in order to assist with the classification of the data items.
+
+The requirements of the project outlined the need to extract 15 pre-identified features and compliment them with 1 custom feature which was decided as the pixel ratio. This feature found the ratio of black to white pixels and could be used to account for variations in image size as it is expected to be proportional to the number of pixels for a given image.
+
+All features were calculated by employing custom built functions across the directory of the data-set in order to create a file containing all the features of each item as such:
+
+```{r}
+#files
+files <- list.files(path= './images', pattern=".csv", all.files=T, full.names=T)
+
+#feature functions
+find_label <- function(file){
+  label <- strsplit(file, "_",)[[1]][2]
+  return(label)
+}
+
+find_index <- function(file){
+  index <- strsplit(file, "_")[[1]][3]
+  index <- substr(index,1,2)
+  return(index)
+}
+```
+
+The find_label and find_index functions derive the label and index from the given file name using standard string manipulation. As stated in the specification, all images are stored in the format \<student_number>\_*\<Label>*\_\<Index>, thus allowing the string to be split into 3 equal parts with \_ as a delimiter.
+
+```{r}
+find_npix <- function(matrix){
+  nr_pix <- matrix == 1
+  nr_pix <- length(which(nr_pix == TRUE))
+  return(nr_pix)
+}
+```
+
+The find_npix function generates a logical matrix of true and false values based on whether or not an element within a matrix is equal to 1 or 0. The matrix then finds the length of the vector containing only true values which equates to the total number of black pixels.
+
+```{r}
+pix_col <- function(matrix,ncols){
+  for(i in 1:ncols){
+    row <- matrix[,i] == 1
+    num <- length(which(row == TRUE))
+    nr_pix_cols = c(nr_pix_cols,num)
+  }
+  return(nr_pix_cols)
+}
+
+pix_row <- function(matrix,nrows){
+  for(i in 1:nrows){
+    row <- matrix[i,] == 1
+    num <- length(which(row == TRUE))
+    nr_pix_rows = c(nr_pix_rows,num)
+  }
+  return(nr_pix_rows)
+}
+```
+
+Using the same concept as the find_npix function, pix_col and pix_row finds the total number of pixels per row in the matrix except instead of looking at the data as a whole, it focuses on each column or each row. This data can then be used in future functions to assist with calculations.
+
+```{r}
+row_pix1 <- function(nr_pix_rows){
+  nrow1 <- nr_pix_rows == 1
+  nrow1 <- length(which(nrow1 == TRUE))
+  return(nrow1)
+}
+
+col_pix1 <- function(nr_pix_cols){
+  ncol1 <- nr_pix_cols == 1
+  ncol1 <- length(which(ncol1 == TRUE))
+  return(ncol1)
+}
+
+row_pix3 <- function(nr_pix_rows){
+  nrow3 <- nr_pix_rows >= 3
+  nrow3 <- length(which(nrow3 == TRUE))
+  return(nrow3)
+}
+
+col_pix3 <- function(nr_pix_cols){
+  ncol3 <- nr_pix_cols >= 3
+  ncol3 <- length(which(ncol3 == TRUE))
+  return(ncol3)
+}
+```
+
+Using the pix_col and pix_row functions, row_pix1, col_pix1, row_pix3 and col_pix3 are able to generate the associated feature values by applying the same principal used to find the number of pixels: generate a logical array based on the required conditions and then find the length of the vector of true values which is associated with the feature itself.
+
+```{r}
+get_aspect_ratio <- function(matrix,ncols,nrows){
+  for(y in 1:ncols){
+    for(x in 1:nrows){
+      if(matrix[x,y]==1){
+        left <- y
+        break
+      }
+    }
+  }
+
+  for(y in ncols:1){
+    for(x in 1:nrows){
+      if(matrix[x,y]==1){
+        right <- y
+        break
+      }
+    }
+  }
+
+  for(x in 1:nrows){
+    for(y in 1:ncols){
+      if(matrix[x,y]==1){
+        tallest <- x
+        break
+      }
+    }
+  }
+
+  for(x in nrows:1){
+    for(y in 1:ncols){
+      if(matrix[x,y]==1){
+        lowest <- x
+        break
+      }
+    }
+  }
+
+  height <- -(lowest - tallest)
+  width <- -(right - left)
+
+  if(height == 0){
+    height = 1
+  }
+
+  if(width == 0){
+    width = 1
+  }
+  aspect_ratio <- width/height
+  return(aspect_ratio)
+}
+```
+
+The aspect ratio of an image is defined as the image width divided by the image height. To find the height of the image, the tallest point can be assumed to be the first pixel encountered if the matrix was to be traversed row by row starting at position 0,0. Equally the lowest point can be assumed to be the first pixel encountered if the matrix was traversed row by row starting at position 18,18. The overall height of the image is the found to be the difference of the y co-ordinates of both values.
+
+The width of the image can be found in a similar format. By assuming the left most pixel is the first pixel encountered if the matrix is traversed column by column starting at position 0,0, the right most pixel can then be found to be equal to the first pixel encountered if the matrix is traversed column by column starting at position 18,18. The overall width is then found to be the difference in x values of both values. The aspect ratio can then be found as width/height.
+
+```{r}
+
+#https://stackoverflow.com/questions/29105175/find-neighbouring-elements-of-a-matrix-in-r
+
+get_neighbours <- function(matrix){
+  matrix.pad = rbind(NA, cbind(NA, matrix, NA), NA)
+  ind = 2:nrow(matrix)+1 # row/column indices of the "middle"
+  neigh = rbind(o  = as.vector(matrix.pad[ind , ind ]),
+                N  = as.vector(matrix.pad[ind - 1, ind    ]),
+                NE = as.vector(matrix.pad[ind - 1, ind + 1]),
+                E  = as.vector(matrix.pad[ind    , ind + 1]),
+                SE = as.vector(matrix.pad[ind + 1, ind + 1]),
+                S  = as.vector(matrix.pad[ind + 1, ind    ]),
+                SW = as.vector(matrix.pad[ind + 1, ind - 1]),
+                W  = as.vector(matrix.pad[ind    , ind - 1]),
+                NW = as.vector(matrix.pad[ind - 1, ind - 1]))
+
+  neigh[is.na(neigh)] <- 0
+  return(neigh)
+}
+```
+
+The get_neighbours function was sourced from <https://stackoverflow.com/questions/29105175/find-neighbouring-elements-of-a-matrix-in-r> and adjusted to also store the source value of the location. It returns a matrix showing each neighbor surrounding a given pixel, allowing for the application of logical statements within the main loop in order to find each of the stated features.
+
+```{r}
+find_neigh1 <- function(neigh,neigh_col){
+  nr_neigh <- c()
+  for(i in 1:ncol(neigh)){
+    row <- neigh[,i] == 1
+    num <- length(which(row == TRUE))
+    nr_neigh = c(nr_neigh,num)
+  }
+  neigh_1 <- length(which(nr_neigh == 1))
+  return(neigh_1)
+}
+```
+
+The find_neigh1 function returns the number of pixels containing exactly one neighbor. Similarly to the cols_with_1 feature, it analyses each column and finds how many neighbors each pixel has, applying the relevant logical statements and returning the feature results to the main body of code.
+
+```{r}
+#https://www.rdocumentation.org/packages/raster/versions/3.4-5/topics/clump
+find_areas <- function(matrix){
+  rast <- raster(matrix)
+  clumps <- clump(rast,directions = 8,gaps = FALSE)
+  values <- freq(clumps)[,1]
+  connected_areas <- values[length(values)-1]
+  return(connected_areas)
+}
+```
+
+In order to calculate the total number of connected areas, the image matrix had to be converted into a raster clump which visualised the density of data distributions. Once this visualisation was complete, the maximum number of connected areas could be withdrawn from the generated vector and provided to the main body of code. The raster clump considered space in 8 directions (N,NE,E,SE,S,SW,W,NW) allowing for full coverage and no gaps. Source: <https://www.rdocumentation.org/packages/raster/versions/3.4-5/topics/clump>
+
+```{r}
+
+
+find_eyes <- function(matrix){
+  inver <- matrix
+  inver[inver == 1] <- -1
+  inver[inver == 0] <- 1
+  inver[inver == -1] <- 0
+  rast <- raster(inver)
+  clumps <- clump(rast,directions = 4,gaps = FALSE)
+  values <- freq(clumps)[,1]
+  eyes <- values[length(values)-1]-1
+  return(eyes)
+}
+```
+
+In order to generate the number of eyes a raster function was once again employed except in this instance the data was transformed to convert all 1's to 0's and all 0's to 1's. The number of directions considered was reduced to 4 in order to preserve the sought after cyclical formation within the shapes and once the code was generated, the total number of eyes was decreased by 1 to take into account the background of the image which would now be seen as a connected area.
+
+```{r}
+#initialise feature arrays
+
+label <- c()
+index <- c()
+nr_pix <- c()
+nrow1 <- c()
+ncol1 <- c()
+nrow3 <- c()
+ncol3 <- c()
+aspect_ratio <- c()
+neigh_1 <- c()
+no_neigh_above <- c()
+no_neigh_left <- c()
+no_neigh_below <- c()
+no_neigh_right <- c()
+no_neigh_horiz <- c()
+no_neigh_vert <- c()
+connected_areas <- c()
+eyes <- c()
+pixel_ratio <- c()
+```
+
+For the calculation of the features no_neigh_above, no_neigh_below, no_neigh_right, no_neigh_horiz and no_neigh_vert, as part of the loop the relevant neighbour areas are selected and checked.
+
+```{r}
+for(i in files){
+    nr_pix_rows <- c()
+    nr_pix_cols <- c()
+    csv <- read.csv(file = i, header = TRUE)
+    matrix <- as.matrix(csv)
+    matrix <- rbind(NA, cbind(NA, matrix, NA), NA)
+    matrix[is.na(matrix)] <- 0
+    nrows <- nrow(matrix)
+    ncols <- ncol(matrix)
+
+    #Create Label & Index
+
+    label <- append(label,find_label(i))
+
+
+    index <- c(index,find_index(i))
+
+
+    #Calculate total number of pixels
+    num_pix <- find_npix(matrix)
+    nr_pix <- c(nr_pix,num_pix)
+
+
+    #Calculate number of pixels in a row & column
+
+    nr_pix_rows <- pix_row(matrix,nrows)
+
+    nr_pix_cols <- pix_col(matrix,ncols)
+
+
+    #rows & cols with 1 pixel
+
+    nrow1 <- c(nrow1,row_pix1(nr_pix_rows))
+
+    ncol1 <- c(ncol1,col_pix1(nr_pix_cols))
+
+    #rows & cols with >= 3 pixels
+
+    nrow3 <- c(nrow3,row_pix3(nr_pix_rows))
+
+    ncol3 <- c(ncol3,col_pix3(nr_pix_cols))
+
+    #aspect ratio
+
+    aspect_ratio <- c(aspect_ratio,get_aspect_ratio(matrix,ncols,nrows))
+
+    #Neighbours
+
+    neigh <- get_neighbours(matrix)
+
+    neigh_col <- ncol(neigh)
+
+    neigh_1 <- c(neigh_1,find_neigh1(neigh,neigh_col))
+
+    no_neigh_above <- c(no_neigh_above,length(which(neigh[2,] == 0 & neigh[1,] == 1 & neigh[3,] == 0 & neigh[9,] == 0 ) == TRUE))
+    no_neigh_below <- c(no_neigh_below,length(which(neigh[6,] == 0 & neigh[1,] == 1 & neigh[5,] == 0 & neigh[7,] == 0) == TRUE))
+    no_neigh_left <- c(no_neigh_left,length(which(neigh[8,] == 0 & neigh[1,] == 1 & neigh[7,] == 0 & neigh[9,] == 0) == TRUE))
+    no_neigh_right <- c(no_neigh_right,length(which(neigh[4,] == 0 & neigh[1,] == 1 & neigh[3,] == 0 & neigh[5,] == 0) == TRUE))
+    no_neigh_horiz <- c(no_neigh_horiz,length(which(neigh[6,] == 0 & neigh[4,] == 0 & neigh[1,] == 1)==TRUE))
+    no_neigh_vert <-  c(no_neigh_vert,length(which(neigh[2,]== 0 & neigh[6,] == 0 & neigh[1,] == 1)==TRUE))
+
+    #Connected Areas
+
+    connected_areas <- c(connected_areas,find_areas(matrix))
+
+    #Eyes
+
+    eyes <- c(eyes,find_eyes(matrix))
+
+    #pixel ratio
+    ratio <- num_pix/(ncols * nrows)
+    pixel_ratio <- c(pixel_ratio,ratio)
+}
+
+
+ #initialise df
+ df <- data.frame(label = label,
+                  index = index,
+                  nr_pix = nr_pix,
+                  rows_with_1 = nrow1,
+                  cols_with_1 = ncol1,
+                  rows_with_3p = nrow3,
+                  cols_with_3p = ncol3,
+                  aspect_ratio = aspect_ratio,
+                  neigh_1 = neigh_1,
+                  no_neigh_above = no_neigh_above,
+                  no_neigh_below = no_neigh_below,
+                  no_neigh_left = no_neigh_left,
+                  no_neigh_right = no_neigh_right,
+                  no_neigh_horiz = no_neigh_horiz,
+                  no_neigh_vert = no_neigh_vert,
+                  connected_areas = connected_areas,
+                  eyes = eyes,
+                  pixel_ratio = pixel_ratio)
+head(df)
+write.csv(df,'./40288049_features.csv',row.names = FALSE)
+```
+
+The data is then loaded into a CSV file for future use in the analysis of the data-set.
+
+# Section 3
+
+## Section 3.1
+
+When conducting statistical analysis of the feature data extracted from the hand drawn images, the first requirement was too analyse any trends in the distribution of the data. For the purpose of this analysis only the first 6 features will be considered:
+
+```{r}
+df <- read.csv('./40288049_features.csv')
+
+features <- c("nr_pix","rows_with_1","cols_with_1","rows_with_3p","cols_with_3p","aspect_ratio","neigh_1","no_neigh_above","no_neigh_below","no_neigh_left","no_neigh_right","no_neigh_horiz","no_neigh_vert","connected_areas","eyes","pixel_ratio")
+labels <- unique(df$label)
+
+```
+
+```{r}
+nr_pix_hist <- ggplot(as.data.frame(df$nr_pix), aes(x = df$nr_pix)) +
+  geom_histogram(breaks=seq(min(df$nr_pix),
+                            max(df$nr_pix), by=3)) +
+  ggtitle("Number of Pixels")
+
+nr_pix_hist
+
+```
+
+```{r}
+rows_1_hist <- ggplot(as.data.frame(df$rows_with_1), aes(x = df$rows_with_1)) +
+  geom_histogram(breaks=seq(min(df$rows_with_1),
+                            max(df$rows_with_1), by=0.9)) +
+  ggtitle("Rows with 1 pixel")
+
+rows_1_hist
+```
+
+```{r}
+cols_1_hist <- ggplot(as.data.frame(df$cols_with_1), aes(x = df$cols_with_1)) +
+  geom_histogram(breaks=seq(min(df$cols_with_1),
+                            max(df$cols_with_1), by=0.9)) +
+  ggtitle("Columns with 1 pixel")
+
+cols_1_hist
+```
+
+```{r}
+rows_3_hist <- ggplot(as.data.frame(df$rows_with_3p), aes(x = df$rows_with_3p)) +
+  geom_histogram(breaks=seq(min(df$rows_with_3p),
+                            max(df$rows_with_3p), by=1)) +
+  ggtitle("Rows with 3 or more pixels")
+
+rows_3_hist
+```
+
+```{r}
+cols_3_hist <- ggplot(as.data.frame(df$cols_with_3p), aes(x = df$cols_with_3p)) +
+  geom_histogram(breaks=seq(min(df$cols_with_3p),
+                            max(df$cols_with_3p), by=0.9)) +
+  ggtitle("Columns with 3 or more Pixels")
+
+cols_3_hist
+```
+
+```{r}
+aspect_ratio_hist <- ggplot(as.data.frame(df$aspect_ratio), aes(x = df$aspect_ratio)) +
+  geom_histogram(breaks=seq(min(df$aspect_ratio),
+                            max(df$aspect_ratio), by=0.09)) +
+  ggtitle("Aspect Ratio")
+
+aspect_ratio_hist
+```
+
+Analyzing the above histograms, it should be noted all visualizations contain a large outlier at the left most value of all histograms. This is hypothesized to be due to the similar shape and structure of the 'i' and '!' symbols as they have a combined subset size of 28 whereas all other data items have a subset size between 8:20.
+
+Treating the outlier as a negligible value for the purpose of recognizing trends, Number of pixels, rows with 1 pixel, rows with 3p pixels, columns with 3p pixels and aspect ratio all appear to follow a normal distribution whilst columns with 1 pixel appears to have a right skewness, with a skew value of approximately 1.21 meaning that the data would need to be transformed in order to yield any significant meaning.
+
+```{r}
+paste("skew:",skew(df$cols_with_1))
+```
+
+## Section 3.2
+
+In order to quantify significant differences between each of the features the data must first be divided into the sub-groups 'letters' and 'non-letters' from which the mean, median and standard deviation can be derived.
+
+```{r}
+letters <- df[df$label %in% c('a','b','c','d','e','f','g','h','i','j'),]
+non_letters <- df[df$label %in% c('smiley','sad','xclaim'),]
+```
+
+```{r}
+letter_means <- as.data.frame(colMeans(letters[,3:18]))
+letter_means
+```
+
+```{r}
+non_letter_means <- as.data.frame(colMeans(non_letters[,3:18]))
+non_letter_means
+```
+
+```{r}
+letter_medians <- as.data.frame(lapply(letters[,3:18],median))
+letter_medians
+```
+
+```{r}
+non_letter_medians <- as.data.frame(lapply(non_letters[,3:18],median))
+non_letter_medians
+```
+
+```{r}
+letter_sd <- as.data.frame(lapply(letters[,3:18],sd))
+letter_sd
+```
+
+```{r}
+non_letter_sd <- as.data.frame(lapply(non_letters[,3:18],sd))
+non_letter_sd
+```
+
+As shown above, the mean, median and standard deviation can be used to highlight features which can be used to distinguish between letters and non-letters and also those which are not relevant to the study.
+
+i.e
+
+For the feature columns with 3 or more pixels, the mean of the letters and non-letters respectively were 6.1 and 5.4, however both had an equal median of 6. The standard deviation of the respective models were 3.38 and 3.67, differing by 0.29. This signifies the close resemblance of the feature in both letters and non-letters.
+
+Three features of interest from this data set are rows with 1 pixel, no neighbor vertical and connected areas.
+
+For rows with 1 pixel, the mean of the letters and non-letters subsets were 4.15 and 2.68 respectively with a respective standard deviation 2.67 and 3.07. The medians of each subset is equal to 5 and 1. The range of each data-set is 11 and 10 showing an almost even spread of data. However, the IQR of the letters subset is equal to 4 whilst the non_letter subset is 6, suggesting a higher level of variance in the non_letter subset which is reinforced by the larger standard deviation. The plots suggest the data of the letters subset has a denser distribution towards the middle of the data spread whilst the non-letters subset is focused more on the initial 60% of the subset until it tails off in the upper 40%.
+
+```{r}
+par(mfrow=c(1,2))
+boxplot(letters$rows_with_1,main = "Plot of rows_with_1 in letters",
+        xlab = "Rows with 1 pixel")
+boxplot(non_letters$rows_with_1,main = "Plot of rows_with_1 in non_letters",
+        xlab = "Rows with 1 pixel")
+```
+
+For no neighbor vertical, the respective letter and non-letter means are 8.33 and 3.25 with a standard deviation of 5.67 and 2.07. The letters subset shows a larger spread of data with a range of approximately 22 whilst the non-letters subset has a range of 7. The IQR of the letters subset represented in the plot suggests the data is densely populated around the bottom 20% of the data whilst the non-letters subset has a more even distribution with almost even quantile splits, suggesting a strong normal distribution. As the first quantile of the letters subset only overlaps with the 3rd quantile of the non-letters subset, it is to be expected that this feature could act as a strong distinguisher between the class of a given data-item.
+
+```{r}
+par(mfrow=c(1,2))
+boxplot(letters$no_neigh_vert,main = "Plot of no_neigh_vert in letters",
+        xlab = "Pixels with no vertical neighbor")
+boxplot(non_letters$no_neigh_vert,main = "Plot of no_neigh_vert in non_letters",
+        xlab = "Pixels with no vertical neighbor")
+```
+
+Finally, with regards to the connected areas the respective means of the letters and non-letters subset are 1.2 and 3.33 with standard deviations of 0.40 and 0.95. The difference between the two means is more than 2 whole standard deviations, implying each subset can be distinguished based on the number of total areas within the subset. As represented within the plots, the minimum value for the non-letter subset is equal to 2.0 whilst the maximum for the letters subset is 1.2, meaning that there is no overlap between this particular feature variable in either subset thus suggesting it could be considered as a distinguishable feature
+
+```{r}
+par(mfrow=c(1,2))
+boxplot(letters$connected_areas,main = "Plot of connected_area in letters",
+        xlab = "Connected Areas")
+boxplot(non_letters$connected_areas,main = "Plot of connected_area in non_letters",
+        xlab = "Connected Areas")
+```
+
+## Section 3.3
+
+After identifying potential feature variables based on the summary statistics in section 3.2, it is now necessary to implement suitable hypothesis tests in order to identify with reasonable certainty features which can significantly differentiate between letters and non-letters.
+
+In this instance, the hypothesis test can be modeled as follows:
+
+H0: There is no difference between the means of letters and non-letters for a given feature.
+
+H1: There is a difference between the means of letters and non-letters for a given feature.
+
+In order to identify a suitable test, the skew of the data must first be considered:
+
+```{r}
+skew_ <- c()
+
+for(i in 3:18){
+  skew_<-c(skew_,skew(df[,i]))
+}
+
+skews <- data.frame(Feature = features,
+                    Skews = skew_)
+
+print(skews)
+```
+
+Whilst the majority of features contain a negligible skew, cols_with_1, no_neigh_vert and eyes all are significantly skewed to the left. This means that the assumptions required for t-tests have been violated and randomization tests should be employed as an alternative.
+
+The randomization test combines both data-sets and aims to prove the null hypothesis by finding no difference in the means.
+
+```{r}
+#randomization tests - code adjusted from sample Lecture code '111_randomization_test_example.R'
+
+nsims = 100000
+pvalues <- c()
+for(i in 3:18){
+  letter_pop <- letters[,i]
+  non_letter_pop <- non_letters[,i]
+
+  obs_diff <- mean(letter_pop) - mean(non_letter_pop)
+
+  all <- c(letter_pop,non_letter_pop)
+
+  nulldiffs <- rep(0,nsims)
+
+  for (ni in 1:nsims) {
+    randomA = sample(all)
+    randomX = randomA[1:length(letter_pop)]
+    randomY = randomA[(length(letter_pop)+1):length(all)]
+    nulldiffs[ni] <- mean(randomX) - mean(randomY)
+  }
+
+  pvalue = sum(abs(nulldiffs)>abs(obs_diff))/nsims
+  pvalues <- c(pvalues,pvalue)
+
+  quantile(nulldiffs, 0.025)
+  quantile(nulldiffs, 0.975)
+
+
+  rand_df <- as.data.frame(nulldiffs)
+  rand_df$group <- "randomization"
+  colnames(rand_df) <- c("test.statistic", "group")
+  rand_df$group <- as.factor(rand_df$group)
+
+}
+```
+
+After simulating each feature for 10,000 cycles, the p-values of each feature are calculated and stored within a data frame which can then be filtered to show only those features which are relevant to a 5% confidence level.
+
+```{r}
+pvals <- data.frame(Feature = features,
+                    P = pvalues) %>% filter((P>=0 & P<=0.025) | (P<=1 & P>=0.975))
+pvals
+```
+
+As previously estimated in section 3.2, rows_with_1 is significant in enabling the model to distinguish between letters and non-letters. As demonstrated below, the spread of data suggests non-letters contain less rows with 1 pixel, as the modal value is clearly equal to 0 whilst letters tend to contain several rows with 1 pixel with a modal value of \~5.
+
+```{r}
+ggplot(df,aes(x = rows_with_1))+
+  geom_histogram(data = letters,aes(fill ="letters"), alpha = 2) +
+  geom_histogram(data = non_letters,aes(fill ="non_letters"), alpha = 2)
+```
+
+With regards to no_neigh_right, the spread of data shows that non_letters and letters appear to have a similar range of date, with the main concentration of letters occurring between 0-10 and the modal value occurring at 14 whilst the non letters have a more normal distribution with the modal value occurring at approximately 17. It could be suggested that the reason for this spread of data is due to the different shapes associated with individual letters causing a right-tailed skew as opposed to the regular nature of the non-letters within the dataset resulting in a more normal distribution of values.
+
+```{r}
+ggplot(df,aes(x = no_neigh_right))+
+  geom_histogram(data = letters,aes(fill ="letters"), alpha = 2) +
+  geom_histogram(data = non_letters,aes(fill ="non_letters"), alpha = 2)
+```
+
+Within the no_neigh_vert feature, a clear divide in the data between non-letters and letters is visible, with the main concentration of non-letters occurring between 0 and 8, whilst the spread of non-letters occurs between 8 and approximately 27, with an outlier within the non-letters data. The non-letters data appears to be more normally distributed in comparison to the letters data which has an apparent right skew. As previously mentioned, this could be due to the unique structure of each individual letter resulting in a specific range of values being calculated in contrast to the regularity of the non-letters.
+
+```{r}
+ggplot(df,aes(x = no_neigh_vert))+
+  geom_histogram(data = letters,aes(fill ="letters"), alpha = 2) +
+  geom_histogram(data = non_letters,aes(fill ="non_letters"), alpha = 2)
+```
+
+The connected_areas feature splits the data into 3 sections, showing that all possible letters are contained within 1 connected area, 20/60 non-letters (xclaim's) are within 2 connected areas and finally the remaining 40 non-letters (faces) are contained within 4 connected areas. As the data is clearly divided with no ambiguity this feature would be an accurate identifier between letters and non-letters.
+
+```{r}
+ggplot(df,aes(x = connected_areas))+
+  geom_histogram(data = letters,aes(fill ="letters"), alpha = 2) +
+  geom_histogram(data = non_letters,aes(fill ="non_letters"), alpha = 2)
+```
+
+Similarly to the connected areas feature, the eyes feature has a clear split with all the non_letters data being contained within 0 eyes. Just less than 50% of the letters data is represented between 1 and 2 eyes implying that the remainder of the letters are also stored within 0 eyes. Whilst this feature can be useful in determining if an image is a letter or non-letter, the ambiguity between the non-letters and remaining letters could lead to inaccuracies in any predictions.
+
+```{r}
+ggplot(df,aes(x = eyes))+
+  geom_histogram(data = letters,aes(fill ="letters"), alpha = 2) +
+  geom_histogram(data = non_letters,aes(fill ="non_letters"), alpha = 2)
+```
+
+## Section 3.4
+
+After identifying the key features for discriminating between letters and non_letters, it is also important to investigate the degree of linear association between variables and identify any underlying relationships using the Pearson's correlation coefficient.
+
+Taking into account the skewness of the data referenced in section 3.3, one again a randomization test will be conducted in order to calculate the linear associations between each variable pair in the data-set.
+
+```{r}
+nsims = 10000
+pval_matrix <- matrix(0, nrow = 16, ncol = 16)
+corr_matrix <- matrix(0, nrow = 16, ncol = 16)
+
+#WARNING: Due to the size of the loop expect an average runtime of 50 minutes for this loop
+
+for(i in 3:18){
+  x_data <- df[,i]
+  for(j in 3:18){
+    nulldiffs <- rep(0,nsims)
+    if(i<j){
+      y_data <- df[,j]
+      for (ni in 1:nsims) {
+        test <- corr.test(data.frame(x_data),data.frame(sample(y_data)))
+        nulldiffs[ni] <- test$r
+      }
+
+      test_r <- corr.test(x_data,y_data)
+      r <- test_r$r
+      r_mean <- mean(nulldiffs)
+      r_sd <- sd(nulldiffs)
+      p <- pnorm(r,mean = r_mean, sd = r_sd)
+      corr_matrix[i-2,j-2] <- r
+      pval_matrix[i-2,j-2] <- p
+    }
+  }
+}
+
+mat_pos <- which((pval_matrix <= 0.025 & pval_matrix!=0) | (pval_matrix>=0.975 & round(pval_matrix, digits = 5)!=1),
+                 arr.ind = TRUE)
+```
+
+```{r}
+x <- c()
+y <- c()
+cor <- c()
+p <- c()
+
+for(i in 1:nrow(mat_pos)){
+  x_ind <- mat_pos[i,1]
+  y_ind <- mat_pos[i,2]
+
+  if(x_ind!=y_ind | pval_matrix[x_ind,y_ind]!=1){
+    x_val <- features[x_ind]
+    y_val <- features[y_ind]
+    x <- c(x,x_val)
+    y <- c(y,y_val)
+    cor <- c(cor,corr_matrix[x_ind,y_ind])
+    p <- c(p,pval_matrix[x_ind,y_ind])
+  }
+}
+
+corr_df <- data.frame(X = x,
+                      Y = y,
+                      R = cor,
+                      P = p)
+
+corr_df
+```
+
+As the correlation tests are completed and refined to a 5% confidence level, there is found to be 35 relevant linear associations, viewable above.
+
+The key features identified from the data-set were: rows_with_1, cols_with_1, aspect_ratio, no_neigh_left, no_neigh_right, connected_areas, and eyes, however all 16 features occur in at least 1 correlation instance..
+
+The modal feature can be seen to be rows_with_1\_pixel, with all instances of this feature displaying a negative correlation between itself and the associated feature variable. This relationship is to be expected as the greater the number of rows containing a single pixel would suggest a lesser number of total pixels which would impact all other features such as rows/columns with 3 or more pixels.
+
+Aspect ratio exhibited associations with rows_with_1, cols_with_1, no_neigh_left, no_neigh_right, connected_areas and eyes and with the exception of rows_with_1, shows a positive correlation between all associations thus making them associations of interest for any possible regression models.
+
+The relationship between rows_with_1 and the associated neighbor features and the cols_with_1 and neighbor features showed that both sets of associations contained a strong correlation with the rows_with_1 associations being negatively correlated and and cols_with_1 being positively correlated, indicating the impact of the height and width of the image on the overall features, indicating that more features can be derived from a taller image than a wider image.
+
+Due to set range within the eye feature (0-2), the data is distributed quite regularly with a notable positive skew associated with the neighbor features and a negative skew notable with regards to rows_with_1, cols_with_1, aspect_ratio and connected_areas. Due to the shape of data following a normal distribution pattern, it may be beneficial to remodel the data as a probability model using the logistic equation p(x) = (e\^(b0+b1x))/(1+e\^(b0+b1x)) and an identifier to distinguish between different subsets of the data.
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 1:6){
+  x <- mat_pos[i,1] + 2
+  y <- mat_pos[i,2] + 2
+  if(x==3){
+    temp <- x
+    x <- y
+    y<- temp
+  }
+  plot(df[,x],df[,y],main = paste(features[x-2],"vs",features[y-2]),xlab = features[x-2], ylab = features[y-2] )
+}
+```
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 7:12){
+  x <- mat_pos[i,1] + 2
+  y <- mat_pos[i,2] + 2
+  plot(df[,x],df[,y],main = paste(features[x-2],"vs",features[y-2]),xlab = features[x-2], ylab = features[y-2] )
+}
+```
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 13:18){
+  x <- mat_pos[i,1] + 2
+  y <- mat_pos[i,2] + 2
+  plot(df[,x],df[,y],main = paste(features[x-2],"vs",features[y-2]),xlab = features[x-2], ylab = features[y-2] )
+}
+```
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 19:24){
+  x <- mat_pos[i,1] + 2
+  y <- mat_pos[i,2] + 2
+  plot(df[,x],df[,y],main = paste(features[x-2],"vs",features[y-2]),xlab = features[x-2], ylab = features[y-2] )
+}
+```
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 25:30){
+  x <- mat_pos[i,1] + 2
+  y <- mat_pos[i,2] + 2
+  plot(df[,x],df[,y],main = paste(features[x-2],"vs",features[y-2]),xlab = features[x-2], ylab = features[y-2] )
+}
+```
+
+```{r}
+par(mfrow=c(3,2))
+for(i in 31:35){
+  x <- mat_pos[i,1] + 2
+  y <- mat_pos[i,2] + 2
+  plot(df[,x],df[,y],main = paste(features[x-2],"vs",features[y-2]),xlab = features[x-2], ylab = features[y-2] )
+}
+```
+
+# Section 4
+
+## Section 4.1
+
+```{r}
+df <- read.csv('./40288049_features.csv')
+```
+
+One of the key features calculated in section 2 was the aspect ratio of an image. This feature variable can be calculated through the use of a multiple regression model.
+
+```{r}
+model <- lm(aspect_ratio ~ nr_pix+rows_with_1+cols_with_1+rows_with_3p+cols_with_3p+neigh_1+no_neigh_above+no_neigh_below+no_neigh_left+no_neigh_right+no_neigh_horiz+no_neigh_vert+connected_areas+eyes+pixel_ratio,df)
+r1 <- summ(model)
+adjr <- summary(model)
+```
+
+The first step of the analysis is too plot a multiple regression model of aspect ratio against all other feature variables within the data-set.
+
+```{r}
+r1
+```
+
+As seen in the above summary, the adjusted r\^2 value is approximately 0.83, a relatively strong value which would indicate the model is useful. However, the model currently uses 15 predictor variables, one of which appears to have no impact on the model at all (pixel_ratio) due to a suspected high level of co-linearity between feature variables. In order to refine the model, the olsrr package can be used to carry out feature selection on the model (ref: <https://www.rdocumentation.org/packages/olsrr/versions/0.5.3>)
+
+```{r}
+#https://www.rdocumentation.org/packages/olsrr/versions/0.5.3
+
+model <- lm(aspect_ratio ~ nr_pix+rows_with_1+cols_with_1+rows_with_3p+cols_with_3p+neigh_1+no_neigh_above+no_neigh_below+no_neigh_left+no_neigh_right+no_neigh_vert+connected_areas+eyes,df)
+k <- ols_step_both_p(model)
+Formula <- as.formula(paste("aspect_ratio ~", paste(as.vector(k$predictors),collapse = " + ")))
+model <- lm(Formula,df)
+```
+
+```{r}
+summ(model)
+```
+
+As seen in the above table, after removing the co-linear irregularities and applying a forward and backward feature selection which removed insignificant feature variables dependent on their p-value, the resultant model has been simplified to 7 predictor variables with an adjusted r\^2 value of approximately 0.83 which is equal to the original value but less complex to compute.
+
+## Section 4.2
+
+From section 3.3, it was apparent the feature no_neigh_vert was the one of the most discriminatory values, having evidence of a clear distribution of data with negligible outliers.
+
+In order to plot a logistic regression model for this feature value, an binary identifier of whether or not a data item is a letter must be appended to the data frame.
+
+```{r}
+df <- read.csv('./40288049_features.csv')
+df$isLetter <- as.integer(df$label %in% c('a','b','c','d','e','f','g','h','i','j'))
+head(df)
+```
+
+After appending the identifier, the data must be shuffled and split into a training and test set with an 80:20 ratio.
+
+```{r}
+shuffled <- df[sample(nrow(df)),]
+training <- shuffled[1:(floor(0.8*nrow(shuffled))),]
+test <- shuffled[(floor(0.8*nrow(shuffled))+1):nrow(shuffled),]
+```
+
+Once the data has been divided, the model can then be generated as such:
+
+```{r}
+glmfit <- glm(isLetter ~ no_neigh_vert,
+              data = training, family = 'binomial')
+summary(glmfit)
+```
+
+The p-value 2.66e-06 shows that this feature is highly significant and is useful at predicting whether or not a data-item is a letter or not. This prediction is done using the logistic regression formula which is modelled on the below graph:
+
+```{r}
+newdata <- as.data.frame(test$no_neigh_vert)
+colnames(newdata)<- "no_neigh_vert"
+predictions <- predict(glmfit,newdata,type = "response")
+
+x.range <- range(training$no_neigh_vert)
+x.vals <- seq(x.range[1],x.range[2],length.out=1000)
+
+fitted.curve <- data.frame(no_neigh_vert = x.vals)
+fitted.curve$isLetter <- predict(glmfit,fitted.curve,type = "response")
+
+plt <-ggplot(training, aes(x=no_neigh_vert, y=isLetter)) +
+  geom_point(aes(colour = factor(isLetter)),
+             show.legend = T)+
+  geom_line(data=fitted.curve, colour="orange", size=1)
+
+plt
+```
+
+## Section 4.3
+
+Taking the feature variables for nr_pixels, aspect_ratio and neigh_1, 3 categorical variables split1, split2 and split3 can be derived based on the proportion of feature values that are greater than the median of the data.
+
+To achieve this, the data should be split into the corresponding subsets letters, non-letters and xclaim's, the medians of each feature should then be calculated and whether or not each feature value is greater than the median should be stored and the proportion of values greater than the median should be recorded.
+
+As part of this code chunk, the probability of each feature is also calculated to provide the necessary data for section 4.4 which will be addressed then.
+
+```{r}
+splits <- matrix(c(1:9),nrow = 3, ncol = 3)
+features <- c(3,8,9)
+
+letters <- df[df$label %in% c('a','b','c','d','e','f','g','h','i','j'),]
+faces <- df[df$label %in% c('smiley','sad'),]
+xclaim <- df[df$label %in% c('xclaim'),]
+normal_cons <- c()
+medians <- lapply(df[,features],median)
+
+for(i in 1:3){
+  letters[,features[i]][letters[,features[i]]<medians[i]] <- 0
+  letters[,features[i]][letters[,features[i]] >= medians[i]] <- 1
+
+  faces[,features[i]][faces[,features[i]]<medians[i]] <- 0
+  faces[,features[i]][faces[,features[i]] >= medians[i]] <- 1
+
+  xclaim[,features[i]][xclaim[,features[i]]<medians[i]] <- 0
+  xclaim[,features[i]][xclaim[,features[i]] >= medians[i]] <- 1
+
+  letter_count <- table(letters[,features[i]])
+  face_count <- table(faces[,features[i]])
+  xclaim_count <- table(xclaim[,features[i]])
+
+  if(is.na(letter_count[2])){
+    letter_count <- c(0,0)
+  }
+
+  if(is.na(face_count[2])){
+    face_count <- c(0,0)
+  }
+
+  if(is.na(xclaim_count[2])){
+    xclaim_count <- c(0,0)
+  }
+  normal_cons <- c(normal_cons,(letter_count[2]+face_count[2]+xclaim_count[2])/nrow(df))
+  
+  splits[1,i] <- (letter_count[2]) / (nrow(letters))
+  splits[2,i] <- (face_count[2]) / (nrow(faces))
+  splits[3,i] <- (xclaim_count[2]) / (nrow(xclaim) )
+
+}
+colnames(splits) <- c("Split1","Split2","Split3")
+rownames(splits) <- c("Letters","Faces","Exclamation Marks")
+splits <- as.data.frame(splits)
+df$split1 <- c(letters[,3],faces[,3],xclaim[,3])
+df$split2 <- c(letters[,8],faces[,8],xclaim[,8])
+df$split3 <- c(letters[,9],faces[,9],xclaim[,9])
+
+print(splits)
+
+letter_splits <- splits[1,]
+face_splits <- splits[2,]
+xclaim_splits <- splits[3,]
+```
+
+## Section 4.4
+
+A naive bayes classifier could be applied to the newly calculated categorical values from section 4.3. The given split proportions are the equivalent to the P(Split\[1:3\] \| Class). Such as with any previous models, the data-set must be divided into a training and test set. Also, within a naive bayes model, it is important to have the ability to identify the class in which an item belongs. Therefore, the class column is added to the data frame.
+
+```{r}
+df$class[df$label %in% c('a','b','c','d','e','f','g','h','i','j')] <- 'Letter'
+df$class[df$label %in% c('smiley','sad')] <- 'Face'
+df$class [df$label %in% c('xclaim')]<- 'Xclaim'
+shuffled <- df[sample(nrow(df)),]
+training <- shuffled[1:(floor(0.8*nrow(shuffled))),]
+test <- shuffled[(floor(0.8*nrow(shuffled))+1):nrow(shuffled),]
+```
+
+The prior probabilities can then be calculated as the number of values in a class/total number of items like such:
+
+```{r}
+q <- table(training$class)
+total <- nrow(training)
+
+prior_face <- q[1]/total
+prior_letter <- q[2]/total
+prior_xclaim <- q[3]/total
+```
+
+Once the prior probabilities are calculated, the denominator of Bayes' theorem can be calculated as the product of the prior probability and the product of each conditional feature probability. To find the posterior probability the denominator must be divided by the normalizing constant which is equal to the intersection of the probability of each feature value.
+
+The following 2 code chunks demonstrate the calculations for the probability of:
+
+P(class\|(split1=1,split2=1,split3=1)) & P(class\|(split1=0,split2=0,split3=0)), using Bayes theorem.
+
+```{r}
+letters_p1 <- (prior_letter * prod(letter_splits))/ prod(normal_cons)
+
+faces_p1 <- (prior_face * prod(face_splits)) / prod(normal_cons)
+
+xclaim_p1 <- (prior_xclaim * prod(xclaim_splits)) / prod(normal_cons)
+```
+
+```{r}
+letters_p0 <- (prior_letter * prod((1-letter_splits)))/prod(normal_cons)
+
+faces_p0 <- (prior_face * prod((1-face_splits))) / prod(normal_cons)
+
+xclaim_p0 <- (prior_xclaim * prod((1-xclaim_splits))) / prod(normal_cons)
+```
+
+```{r}
+p1 <- c(letters_p1,faces_p1,xclaim_p1)
+p0 <- c(letters_p0,faces_p0,xclaim_p0)
+
+nb <- data.frame(splits1 = p1,
+                 splits0 = p0)
+
+print(nb)
+```
+
+In the above table, splits1 is representative of P(class\|(split1=1,split2=1,split3=1)) and splits0 of P(class\|(split1=0,split2=0,split3=0)).
+
+The results for data of the class 'Letter' shows that for a given data-item, if all splits are equal to 1, there is an approximately 56% chance of this item being of the class 'Letter' and if all splits are 0 there is an approximately 39% chance of the item being of the class 'Letter'. This suggests that for data-items of the class 'Letter', the optimal distribution of splits will be a range of 0's and 1's.
+
+The results of the data of the class 'Faces' shows that for a given data-item, if all splits are equal to 1, there is an approximately 99% chance of the item being classed as a 'Face' and if all splits are equal to 0 there is an approximately 1.2% chance of the item being classified as a 'Face' thus showing the most likely conditions to find an item of the class 'Face' is for all splits to equal 1.
+
+Finally, the results of the data of the class 'xclaim' shows that for a given data-item, if all splits are equal to 1 it is statistically impossible for the item to be of the class 'xclaim' based on the training data. However, if all splits are equal to 0 there is an approximately 95% chance the item is of the class 'xclaim' thus showing the most likely conditions to find an item of the class 'xclaim' is for all splits to equal 0.

@@ -1,0 +1,558 @@
+---
+title: "Assignment 3: Machine Learning"
+author: "Kaylem McShane (40288049)"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document:
+     includes: 
+         in_header: "preamble.tex"
+---
+
+# Introduction
+
+```{r}
+library(jtools) #https://www.rdocumentation.org/packages/jtools/versions/2.1.4
+
+library(olsrr) #https://www.rdocumentation.org/packages/olsrr/versions/0.5.3
+
+library(ggplot2) #https://www.rdocumentation.org/packages/ggplot2/versions/3.3.5
+
+library(caret) #https://www.rdocumentation.org/packages/caret/versions/6.0-91
+
+library(MLeval) #https://www.rdocumentation.org/packages/MLeval/versions/0.3
+
+library(class) #https://cran.r-project.org/web/packages/class/class.pdf
+
+library(dplyr) #https://www.rdocumentation.org/packages/dplyr/versions/0.7.8
+
+library(stringr) #https://cran.r-project.org/web/packages/stringr/index.html
+
+library(randomForest) #https://cran.r-project.org/web/packages/randomForest/randomForest.pdf
+
+```
+
+```{r}
+set.seed(42)
+```
+
+The aim of this report is to analyse the accuracy of common machine learning models, such as Logistic Regression models, K-Nearest Neighbors and Random Forests, at identifying and classifying data items based on a data-set of pre-engineered features from assignment 2 of CSC2062 and the unique data set provided as part of the module.
+
+# Section 1
+
+## Section 1.1
+
+The first model to be trained within this report is a Logistic Regression model that can predict whether or not an item is a letter or non-letter based on the parameters nr_pix (number of pixels) and aspect_ratio. The first model will be trained on a training set which equates to a random 80% of the data population and it's performance will then be analysed based on the remaining 20% of data which will account for a test set of data.
+
+```{r}
+df <- read.csv('./40288049_features.csv')
+df$isLetter <- as.integer(df$label %in% c('a','b','c','d','e','f','g','h','i','j'))
+```
+
+```{r}
+shuffled <- df[sample(nrow(df)),]
+training <- shuffled[1:(floor(0.8*nrow(shuffled))),]
+test <- shuffled[(floor(0.8*nrow(shuffled))+1):nrow(shuffled),]
+```
+
+Once the data has been successfully divided, the training data can be passed to glmfit function to generate a logistic regression model based on the aspect ratio and number of pixels in an image.
+
+```{r}
+glmfit <- glm(isLetter ~ aspect_ratio + nr_pix,
+              data = training, family = 'binomial')
+
+summary(glmfit)
+```
+
+Based on the summary of the model, the selected features number of pixels and aspect ratio are not overly significant, showing P-values of 0.857 and 0.385 respectively. This is to be expected as neither feature was included in the list of 5 significant features from section 3.3 in assignment 2 and the correlation between the 2 features was found to be insignificant in section 3.4.
+
+The Null deviance of the model was found to be 152.36 on 111 degrees of freedom and the Residual Deviance was found to equal 150.04 on 109 degrees of freedom. Given that x\^2 = Null Deviance - Residual Deviance, the value for x\^2 = 2.32. (source: [\<https://www.statology.org/null-residual-deviance/#:\~:text=The%20null%20deviance%20tells%20us,model%20with%20p%20predictor%20variables>.](https://www.statology.org/null-residual-deviance/#:~:text=The%20null%20deviance%20tells%20us,model%20with%20p%20predictor%20variables.))
+
+The calculated value for chi-square(x\^2) can then be used to calculate the associated p-value for 2 degrees of freedom, given that the model is based off of 2 feature variables.
+
+```{r}
+pchisq(2.32, df=2, lower.tail=FALSE)
+```
+
+The p-value was found to equal 0.3134862 , greater than the critical value of 0.05, thus reinforcing the findings of the previous assignment in showing that the relationship between the 2 features is not significant. (source: <https://stats.stackexchange.com/questions/250819/r-calculate-p-value-given-chi-squared-and-degrees-of-freedom>)
+
+Despite this, the model can still be used to generate predictions based on the test data that was separated from the data set prior to the model being trained.
+
+```{r}
+newdata <- data.frame(aspect_ratio = test$aspect_ratio,
+                         nr_pix = test$nr_pix)
+
+predictions <- predict(glmfit,newdata,type = "response")
+
+predictions[predictions>=0.5] <- 'Letter'
+
+predictions[predictions<0.5] <- 'Non_Letter'
+```
+
+After finding the predictions of the model, they can be compared to the actual labels of the test data to generate a confusion matrix.
+
+```{r}
+obs <- data.frame(acc = test$isLetter,
+                  pred = predictions)
+
+obs$acc[obs$acc == 1] <- 'Letter'
+obs$acc[obs$acc == 0] <- 'Non_Letter'
+
+nn <- length(which(obs$acc == 'Non_Letter' & obs$pred == 'Non_Letter'))
+
+ny <- length(which(obs$acc == 'Non_Letter' & obs$pred == 'Letter'))
+
+yn <- length(which(obs$acc == 'Letter' & obs$pred == 'Non_Letter'))
+
+yy <- length(which(obs$acc == 'Letter' & obs$pred == 'Letter'))
+
+val <- c(nn,ny,yn,yy)
+
+cm <- matrix(val,nrow = 2, ncol = 2)
+
+colnames(cm) <- c('acc_Non_Letter' , 'acc_Letter')
+rownames(cm) <- c('pred_Non_Letter' , 'pred_Letter')
+
+cm
+```
+
+```{r}
+accuracy <- (cm[2,2] + cm[1,1])/(cm[1,2]+cm[2,2]+cm[1,1]+cm[2,1])
+
+accuracy
+```
+
+The overall accuracy of the model is \~67.8% indicating that the model is more accurate than randomly classifying data items, which would theoretically provide a 50% accuracy. Given that the model is using 2 relatively insignificant features, this accuracy suggests the model performs more adequately than a given random model.
+
+```{r}
+precision <- cm[2,2]/(cm[2,2]+cm[2,1])
+
+precision
+```
+
+The precision of the model is \~63.6%, a value \~4% smaller than the accuracy of the model but is also better than randomly selecting the label of the test items as for every value predicted to be a letter, \~63.6% are correct, meaning that 36.4% of letter predictions are actually non-letters, suggesting an inability from the model to differentiate between letters and non-letters.
+
+```{r}
+recall <- cm[2,2]/(cm[2,2] + cm[1,2])
+
+recall
+```
+
+The recall value on the other-hand is equal to 93.33%, meaning that for all values we predict to be yes which are actually yes, only 6.67% are misclassified as a false negative. This suggests that the model can capably recognize letters from non-letters, but struggles to differentiate if a non-letter is a letter or not.
+
+```{r}
+fp_rate <- cm[2,1]/(cm[2,1]+cm[1,1])
+fp_rate
+```
+
+The false positive rate was found to be \~61.5%, further highlighting the inability of the model to differentiate between letters and non-letters efficiently with only 38.5% of non-letters being successfully identified. This may be due to the wide range of data in the non-letter data-set and the lack of additional feature information in order to accurately differentiate between the 2.
+
+```{r}
+f1 <- 2*(precision*recall)/(precision + recall)
+
+view <- data.frame(accuracy = accuracy,
+                   precision = precision,
+                   recall = recall,
+                   false_pos_rate = fp_rate,
+                   f1 = f1)
+
+f1
+```
+
+The F1 score of the model was found to be \~75.7%. This value shows a \~8% increase on the initial accuracy and suggests that the model is more effective than randomly selecting labels for a test set, however it could be improved upon using methods such as cross-validation which will be explored in section 1.2.
+
+## Section 1.2
+
+This section will demonstrate the effects of defining a logistic regression model with the same features of section 1.1 with the inclusion of 5-fold cross-validation.
+
+Cross-validation takes an entire data-set as opposed to the training and test sets used in section 1.1, and partitions it into a series of folds which are designated as training and test data. Each fold is used to test a model and the average error rate is recorded, making use of 100% of the data and removing selection bias from the training process.
+
+Due to the use of cross-validation a training and test set is no longer required and the full data set can be passed to the model.
+
+```{r}
+df$isLetter[df$isLetter==1] <- 'Letter'
+df$isLetter[df$isLetter==0] <- 'Non_Letter'
+kfoldsk = 5
+```
+
+```{r}
+train_control <- trainControl(method="repeatedcv", number=kfoldsk, 
+                              savePredictions=TRUE, 
+                              classProbs = TRUE)
+
+model <- train(isLetter~ nr_pix + aspect_ratio, data=df, 
+               trControl=train_control, method="glm", family="binomial")
+```
+
+Once the model has been trained, a confusion matrix can once again be plotted to analyse the performance of the model.
+
+```{r}
+cm = confusionMatrix(table(model$pred$Letter >= 0.5,
+                           model$pred$obs == "Letter")) 
+
+cm
+```
+
+```{r}
+tab <- cm$table
+
+tab
+```
+
+Similarly to the previous confusion matrix, there appears to be a spread of responses, as to be expected given the significance of the feature variables.
+
+```{r}
+accuracy <- (tab[2,2] + tab[1,1])/(tab[1,2]+tab[2,2]+tab[1,1]+tab[2,1])
+
+accuracy
+```
+
+The models accuracy was found to be 62.86%, an \~5% decrease on the non-cross-validated model. This result was not expected, as cross-validation in theory should allow models to better handle unseen data as well as training them on a greater set of data, thus providing a greater accuracy. However, in this instance that is not the case.
+
+```{r}
+precision <- tab[2,2]/(tab[2,2]+tab[2,1])
+
+precision
+```
+
+The precision of the model was found to be relatively similar to the accuracy, this time equaling \~63%, a decrease of \~1% from the non-cross-validated model. Once again, the precision of the cross-validated model is less than that of the non-cross-validated model although only by 1% meaning that the performances are relatively similar, with both models only identifying approximately 38% of letters as false positives.
+
+```{r}
+recall <- tab[2,2]/(tab[2,2] + tab[1,2])
+
+recall
+```
+
+The recall score of the cross-validated model was found to be significantly higher than the precision and accuracy, highlighting the effectiveness of the model at correctly identifying letters which are letters, with only 12 letters being incorrectly classified, 15% of the letters subset. This result is still smaller than the non-cross-validated model by \~8.33%, a significant reduction.
+
+```{r}
+fp_rate <- tab[2,1]/(tab[2,1]+tab[1,1])
+fp_rate
+```
+
+The false positive rate of the cross-validated model was found to be \~66.7%, an almost 5% increase on the non-cross-validated model meaning that only 33.3% of the non-letters subset are correctly identified. Once again, this appears to be a result of the lack of significant feature information within the model.
+
+```{r}
+f1 <- 2*(precision*recall)/(precision + recall)
+
+row <- c(accuracy,precision,recall,fp_rate,f1)
+
+view[2,] <- row
+
+rownames(view)<- c('Non_CV','CV')
+
+f1
+```
+
+The generated F1 score for the cross-validated model was found to be \~72.3, decreasing by \~3.4% and showing that the model underperforms through the use of cross-validation, with the model still struggling to differentiate between letters and non-letters with only 20/60 possible non-letters being successfully identified. The non-cross-validated model appears to perform better due to the fact it is tested on a much smaller data set, suggesting there may be an element of over-fitting impacting the models performance and reducing the effectiveness of the cross-validated model in comparison.
+
+```{r}
+view
+```
+
+## Section 1.3
+
+```{r}
+res <- evalm(model)
+
+res$roc
+```
+
+The ROC curve for the model displayed in 1.2 shows the effect of using 2 relatively insignificant features to make classifications on a data set. The total area under the curve is found to be 55%, 10% above the 50% threshold which is representative of random selection. The only notable 'peak' within the graph is occurs at \~(0.125, 0.35). Whilst the false positive rate is low-enough to be considered a suitable position, having a true positive rate of only \~35% would not be significant enough to create an effective model.
+
+This curve could be improved upon by generating a model that utilizes all 16 features of the data-set as opposed to only 2. By providing the model with more data it can make more informed decisions and effectively classify the data.
+
+# Section 2
+
+Moving away from the logistic regression model, the aim of this section is to perform 4-way classification for letters, happy faces, sad faces and exclamation marks through the use of a K-nearest-neighbour model. For the purpose of this section, only letters with the labels 'a' and 'j' will be used in the letters class. In instances were cross-validation is not applied, the training data should also be used as the test data.
+
+```{r}
+df <- read.csv('./40288049_features.csv')
+
+data <- data.frame(df[which(df$label %in% c('a','j','sad','smiley','xclaim')),])
+
+data$class[data$label %in% c('a','j')] <- 'Letter'
+
+data$class[data$label %in% c('smiley')] <- 'Smiley_Face'
+
+data$class[data$label %in% c('sad')] <- 'Sad_Face'
+
+data$class[data$label %in% c('xclaim')] <- 'Xclaim'
+```
+
+## Section 2.1
+
+Before generating the Knn model, 4 suitable features must be selected to base any predictions of off. From the given data set, the features 'rows with 1 pixel', 'no neighbor vertical', 'connected areas' and 'eyes' will be selected. This is because, based on the results of section 3.3 from assignment 2, the P-values of these features are in the range 0.00000 - 0.00327 meaning that they are all highly significant and will yield significant results within the model.
+
+In order to ensure the best value of K is selected for the model, all odd-values of K between 1 and 13 inclusive. This will enable a full range of accuracies to be considered in order to identify the optimal value of K.
+
+```{r}
+k <- seq(1,13,2)
+x <- cbind(data$rows_with_1,data$no_neigh_vert,data$connected_areas,data$eyes)[1:nrow(data),]
+colnames(x) <- c('rows_with_1','no_neigh_vert','connected_areas','eyes')
+
+y <- cbind(data$class)[1:nrow(data),]
+accuracies <- c()
+```
+
+```{r}
+for(i in k){
+
+  knn.pred=knn(x,x,y,k=i)
+  
+  tab <- table(knn.pred,y)
+  
+  print(i)
+  print(tab) 
+  
+  accuracy <- mean(knn.pred == y)
+  
+  accuracies <- c(accuracies, accuracy)
+}
+```
+
+```{r}
+as.data.frame(accuracies)
+```
+
+In the above table of accuracies, the maximum value is 89.47% with a K value equal to 3. This accuracy shows that the model is capable of successfully identifying the class of a given test-item. However, it should be considered that due to use of the training data as the test data there is a high probability of over-fitting occurring within the model resulting in over-exaggerated accuracy which may not be representative of the performance on unseen data.
+
+With regards to the performance of the model itself, the above confusion matrices show the classification of each unique class. The exclamation marks are often classified correctly 90% of the time. The model misclassified it as a smiley face, a similarity which will require further exploration within the feature data. The letters class was also classified highly likely, between 75-94%, with most misclassifications occurring with the exclamation class. This is to be expected due to the similarities between j and !, both consisting of a similar narrow shape, which will impact both the rows with 1 pixel and no neighbors vertical features, and having 2 connected areas. To reduce this impact more features could be applied, providing more date to distinguish the 2 classes. As the value for K increased, some letters were misclassified as smiley faces. This could be a result of the model having such a small data-set as when k \>5, it accounts for a relatively large portion of the data creating a larger variance in classifications. The classifications with the most uncertainty are the classes happy and sad faces. Due to the similarities in shape and layout, it is to be expected that the model would encounter issues with this classification as the only distinguisher is the shape of the mouth, which given the 4 features employed within the model, may not be apparent in the data. As previously mentioned, this can be countered by retraining the model with more features and providing more data to distinguish between classes.
+
+## Section 2.2
+
+In order to compare the difference in performances, a Knn model using 5-fold cross-validation will be applied like such:
+
+```{r}
+train_control <- trainControl(method="cv", number=5, 
+                              savePredictions=TRUE, 
+                              classProbs = TRUE)
+
+og_model <- train(class~ rows_with_1 + no_neigh_vert + connected_areas + eyes, data=data, 
+               trControl=train_control, method="knn", tuneGrid = data.frame(k=k))
+
+og_model
+```
+
+In the above summary, it is apparent that once again the optimal value of K is 3, however the accuracy of the model is notably lower than the non-cross-validated model. Whilst this may not be the initial expectation, it is important to take into account the effects of over-fitting within the non-cross-validated model on the accuracies, whilst the accuracy is lower, the cross-validated model has been trained on unseen data from the data-set, which as a result implies it will perform better against unknown data in a real world setting, this is reinforced by the 75.2% kappa level of the model, highlighting how it performs superiorly to a given random model.
+
+## Section 2.3
+
+As found in Section 2.2, the optimal value of K was equal to 3 with an accuracy of 81.5%.
+
+```{r}
+confusionMatrix(og_model, norm = "none")
+```
+
+The model showed that exclamation marks were classified with 90% accuracy and the letters with 93.75% accuracy, with one letter being misidentified as an exclamation mark and one exclamation mark being misidentified as a sad face. As commented on before, this is hypothesized to be a result of the similarities between exclamation marks and the letter 'j', i.e 2 connected areas, narrow, long bodies, however the classification of an exclamation mark as a sad face appears to be an outliar with no apparent trend.
+
+The model appears to struggle most in the differentiation between sad and smiley faces, accurately predicting 55% of sad faces. Sad faces were only misclassified as happy faces highlighting the systems struggles at differentiating between the 2. This issue could be overcame through the use of more features in order to provide more information on the classes as at present, the model only utilizes 25% of the possible feature information.
+
+## Section 2.4
+
+```{r}
+inv_k <- 1/k
+plot(inv_k, accuracies, type="o", col="red",pch = "o",lty = 1, ylab = "Accuracy Rate",ylim = c(0.60,0.9))
+points(inv_k, og_model$results$Accuracy, col = "green", pch = "*")
+lines(inv_k, og_model$results$Accuracy, col = "green", lty = 2)
+legend(x = "bottom",inset = 0,
+       legend = c("Non-Cross-Validated",'Cross-Validated'), 
+       col=c("red","green"), lwd=5, cex=.5, horiz = TRUE)
+```
+
+The above graph, based on figure 2.17 of ISLR Textbook, shows the accuracies of the cross-validated and non-cross-validated models. Both graphs show a smooth logarithmic growth with the non-cross-validated model having a larger minimum value of 73.7%. The cross-validated model appears to have an outlier value at inv_k = 1/9 causing a minor peak which then declines at inv_k = 1/7 to continue along the logarithmic curve shown. The shape of both curves appear to follow a logarithmic growth, with the cross-validated reaching the maximum accuracy of 81.5% at inv_k = 1/3 before going into a decline to reach 78.9% at inv_k = 1. The decline may be a result of the number of features being used to train the model, as it only accounts for 25% of the total feature data that is available meaning that similar data items such as the smiley and sad faces may be misidentified as one another, as evidenced within the confusion matrices of section 2.1 and 2.2. The non-cross-validated model similarly follows the logarithmic growth until inv_k = 1/3 which yields a maximum value of 89.47%, before decreasing steadily to a value of 86.8%. It would be expected due to the effects of over-fitting on the model that a biased result on the test data would be evident. As the test data is equal to the training data, it would be expected that for k = 1, the model would be 100% accurate which in practice does not occur. As stated previously, this can be assumed to be due to the similarities in the happy and sad face classes and the lack of total information, only utilising 25% of the available feature data. If all 16 features were to be used the graph would tend to equal a value \~100%.
+
+# Section 3
+
+Within this section, a Random Forest Classifier with 5-fold cross-validation will be trained on a new data-set which represents the feature data previously used. In contrast to earlier models, 1300 data items will be used as opposed to 140, with all 13 unique labels being considered, as opposed to the previously used subsets of letters, happy faces, sad faces and exclamation marks.
+
+```{r}
+data <- read.csv('./all_features.csv', header = FALSE)
+head(data)
+
+label <- c()
+index <- c()
+nr_pix <- c()
+nrow1 <- c()
+ncol1 <- c()
+nrow3 <- c()
+ncol3 <- c()
+aspect_ratio <- c()
+neigh_1 <- c()
+no_neigh_above <- c()
+no_neigh_left <- c()
+no_neigh_below <- c()
+no_neigh_right <- c()
+no_neigh_horiz <- c()
+no_neigh_vert <- c()
+connected_areas <- c()
+eyes <- c()
+diagonaless <- c()
+
+for(i in 1:nrow(data)){
+  str <- strsplit(toString(data[i,1]),"\t")
+  label <- c(label,str[[1]][1])
+  index <- c(index, str[[1]][2])
+  nr_pix <- c(nr_pix, str[[1]][3])
+  nrow1 <- c(nrow1,str[[1]][4])
+  ncol1 <- c(ncol1,str[[1]][5])
+  nrow3 <- c(nrow3,str[[1]][6])
+  ncol3 <- c(ncol3,str[[1]][7])
+  aspect_ratio <- c(aspect_ratio,str[[1]][8])
+  neigh_1 <- c(neigh_1,str[[1]][9])
+  no_neigh_above <- c(no_neigh_above,str[[1]][10])
+  no_neigh_left <- c(no_neigh_left,str[[1]][11])
+  no_neigh_below <- c(no_neigh_below,str[[1]][12])
+  no_neigh_right <- c(no_neigh_right,str[[1]][13])
+  no_neigh_horiz <- c(no_neigh_horiz,str[[1]][14])
+  no_neigh_vert <- c(no_neigh_vert,str[[1]][15])
+  connected_areas <- c(connected_areas,str[[1]][16])
+  eyes <- c(eyes,str[[1]][17])
+  diagonaless <- c(diagonaless,str[[1]][18])
+}
+
+df <- data.frame(label = label,
+                 index = index,
+                 nr_pix = nr_pix,
+                 rows_with_1 = nrow1,
+                 cols_with_1 = ncol1,
+                 rows_with_3p = nrow3,
+                 cols_with_3p = ncol3,
+                 aspect_ratio = aspect_ratio,
+                 neigh_1 = neigh_1,
+                 no_neigh_above = no_neigh_above,
+                 no_neigh_below = no_neigh_below,
+                 no_neigh_left = no_neigh_left,
+                 no_neigh_right = no_neigh_right,
+                 no_neigh_horiz = no_neigh_horiz,
+                 no_neigh_vert = no_neigh_vert,
+                 connected_areas = connected_areas,
+                 eyes = eyes,
+                 diagonaless = diagonaless)
+
+df = df[,!(colnames(df) %in% "index")]
+```
+
+## Section 3.1
+
+Within the random forest model, the two hyper-parameters to be considered in this instance will be the number of trees, Nt, and the number of predictors per node, Np. The number of trees used within a model defines the number of independent classifications being made in order to vote on the overall classification of the data-item. Theoretically, the number of trees is proportional to the overall accuracy, however, there is an optimal value that when exceeded, the change in accuracy will not be significant enough to justify the increase in model complexity. The number of predictors represents the number of randomly selected features which are applied to each tree in order to classify a given data-item. Higher values of Np can result in a higher degree of correlation between trees but weaken the accuracy of the tree as a whole, meaning that an optimal value must be identified in order to find the optimal accuracy of the model.
+
+In order to train the optimal random forest model, a grid-search of the models hyper-parameters must first be carried out to find the optimal number of trees and number of predictors per node. The grid-search is a method with the purpose of tuning the hyper-parameters of the model to the best possible values.
+
+For the purpose of this report, the number of trees will be taken from the range 25-375 in increments of 50, allowing for 8 unique models to generated. The number of predictors randomly selected per node will be contained to the values of the set {2,4,6,8}, allowing for 32 possible combinations of Random Forest.
+
+```{r}
+Nt <- seq(25,375,50)
+Np <- c(2,4,6,8)
+
+opNt <- 0
+opNp <- 0
+maxAcc <- 0
+accuracies <- c()
+```
+
+Before training the model, a control parameter is required within the caret library, specifying the appropriate methods to employ such as 5-fold cross-validation and a grid-search.
+
+```{r}
+control <- trainControl(method = 'repeatedcv', number = 5, search = 'grid')
+tune_grid <- expand.grid(.mtry = Np)
+results <- data.frame(matrix(ncol = 5, nrow = 8))
+```
+
+The model can now be trained across each of the 4 predictor values, for each value of Nt as such:
+
+```{r}
+for(i in 1:length(Nt)){
+  rf_model <- train(label~.,data = df,method = 'rf',metric = 'Accuracy', tuneGrid = tune_grid,ntree = Nt[i])
+  
+  accuracy <- max(rf_model$results$Accuracy)
+  
+  if(accuracy >= maxAcc){
+    maxAcc <- accuracy
+    opNt <- Nt[i]
+    opNp <- rf_model$bestTune$mtry
+  }
+  results[i,] <- c(Nt[i],rf_model$results$Accuracy)
+}
+```
+
+```{r}
+colnames(results) <- c("Nt","Np-2","Np-4","Np-6","Np-8")
+results
+```
+
+From the generated results table, it is evident that the optimal number of trees is 325 and the optimal number of predictors is 8, providing a maximum accuracy of 61.9%. This value could be improved by considering up to all 16 predictors at a node or potentially by increasing the number of trees, however, it should be noted that the maximum accuracy occurs at Nt = 325, then begins to decline suggesting that this value may provide the optimal complexity/performance ratio. This is reinforced by the below graph which shows the accuracy of Np-8 increasing to a maximum point at x = 325, before showing signs of a plateau, meaning that the increase in accuracy will not be proportional to the increase in complexity resulting in the total time to run the model increasing whilst the accuracy increase may be negligible.
+
+```{r}
+plot(results$Nt,results$`Np-8`,type="o", col="red",pch = "o",lty = 1, ylab = "Accuracy Rate",xlab = "Number of trees", ylim = c(0.3,0.7),main = "Plot of Accuracies Against Number of Trees in a RF")
+points(results$Nt, results$`Np-6`, col = "green", pch = "*")
+lines(results$Nt, results$`Np-6`, col = "green", lty = 2)
+points(results$Nt, results$`Np-4`, col = "blue", pch = 4)
+lines(results$Nt, results$`Np-4`, col = "blue", lty = 2)
+points(results$Nt, results$`Np-2`, col = "purple", pch = 0)
+lines(results$Nt, results$`Np-2`, col = "purple", lty = 2)
+legend(x = "top",inset = 0,
+       legend = c("Np-2","Np-4","Np-6","Np-8"), 
+       col=c("purple","blue","green","red"), lwd=5, cex=.5, horiz = TRUE)
+```
+
+## Section 3.2
+
+When applying both cross-validation and random forest classification, there is a degree of randomness in both the selected data and also the selected predictors, therefore it is important to consider to the variability in the accuracy of the model. In order to achieve this, a sample of 15 accuracies will be collated by retraining the model 15 times on the same data, features and parameters, thus ensuring each value is independent of the other.
+
+```{r}
+control <- trainControl(method = 'repeatedcv', number = 5, search = 'grid')
+tune_grid <- expand.grid(.mtry = opNp)
+model_acc <- c()
+```
+
+```{r}
+for(i in 1:15){
+  rf_model <- train(label~.,data = df,method = 'rf',metric = 'Accuracy', tuneGrid = tune_grid,ntree = opNt)
+  
+  accuracy <- max(rf_model$results$Accuracy)
+  model_acc <- c(model_acc,accuracy)
+}
+```
+
+```{r}
+hist(model_acc,main = "Histogram of Accuracies for a given RF",col = "red",xlab = "Accuracy")
+abline(v = mean(model_acc),                       
+       col = "green",
+       lwd = 3)
+text(x = mean(model_acc) * 1.7,                   
+     y = mean(model_acc) * 1.7,
+     paste("Mean =", mean(model_acc)),
+     col = "blue",
+     cex = 2)
+```
+
+```{r}
+data.frame(Mean = mean(model_acc),
+           Sd = sd(model_acc))
+```
+
+As shown above, the mean value for the accuracy of the optimal random forest was found to be 61.8% with a standard deviation of 0.0052%. Each accuracy was calculated independently from each other and there does not appear to be any extreme skew in the data, therefore, due to the small dataset of 15 values a t-test can be employed to identify whether or not this model is better than random chance.
+
+The following hypothesis test should be considered for this section:
+
+H0: The observed mean is not significant and no better than chance (1/13).
+
+H1:The observed mean is significant and the model has a higher probability than chance.
+
+As the model is making classifications based on 13 possible classes, the null value of this test will be 1/13 and the considered accuracy will be the model accuracy.
+
+```{r}
+t.test(model_acc, mu = (1/13))
+```
+
+As shown in the above summary, the measured p-value was equal to 2.2e-16, well within the 5% confidence value it was measured against. This means that the model operates significantly better than random chance at an average accuracy of approximately 62% and we can treat any randomness in the training of the model as negligible.
+
+# Conclusion
+
+Throughout this report, multiple models have been trained using various control methods and a varying number of predictor variables allowing for several conclusions to be drawn.
+
+Firstly, the application of cross-validation may not always result in an increased accuracy but will allow the model to be trained without bias, enabling the model to perform adequately on unseen data without the influence of over-fitting.
+
+Secondly, within a given the model, as the number of significant predictors increases, as does the model accuracy. This was evidenced throughout the report as the Logistic Regression model used 2 features which were found to be insignificant and had accuracies ranging from 62% to 67%, the K-nearest-neighbors model used 4 features which were highly significant and had an accuracy between 82% to 89% and the random forest model made use of all 16 features of varying significance with between 2 and 8 being applied to each individual forest, resulting in an maximum average accuracy of 62% when 8 features are considered per tree, showing that by maximizing the number of significant features, the accuracy will increase as a consequence.
